@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<script src="/javascripts/vendor/d3.min.js"></script>
+<script src="/javascripts/vendor/topojson.min.js"></script>
+
+<body>
+
+<script>
+var width = 960;
+var height = 500;
+
+//create SVG element
+var svg = d3.select('body').append('svg')
+  .attr('width', width)
+  .attr('height', height);
+
+var geoLayer = svg.append('g');
+var infoLayer = svg.append('g');
+infoLayer.append('rect').attr({stroke:'none',fill:'rgba(0,0,0,0.75)'});
+var infoText = infoLayer.append('g');
+infoLayer.current = null;
+
+
+var zoom = d3.behavior.zoom()
+  .on('zoom', function()
+  {
+    projection.translate(zoom.translate()).scale(zoom.scale());
+    geoLayer.selectAll('path').attr('d', path);
+  });
+
+svg.call(zoom);
+
+zoom.translate([width/2,height/2]).scale(20000);
+
+var projection = d3.geo.mercator()
+  .center([139.4452884,35.7106589]) 
+  .scale(zoom.scale())
+  .translate(zoom.translate());
+var path = d3.geo.path().projection(projection);
+
+
+var jsonUrl = "http://api.e-stat.go.jp/rest/2.0/app/json/getStatsData?appId=",
+    apiKey = "686f93a0ce2d5f2a63e0bbb84cfef7850fdbcb99",
+    statsDataId = "0000033336" // H22国勢　有配偶の女性就業者（３）、常住地による人口（７）、人口 （常住地）全国・都道府県・市区町村
+    cdArea = "&metaGetFlg=Y&cntGetFlg=N&cdAreaFrom=13101&cdAreaTo=13421"
+var url = jsonUrl + apiKey + "&statsDataId=" + statsDataId + cdArea
+
+d3.json(url, function(error, json)
+{
+  if(error)
+  {
+    return;
+  }
+
+  var valueData = json['GET_STATS_DATA']['STATISTICAL_DATA']['DATA_INF']['VALUE'].filter(function(item, index){
+    if(item['@cat01'] == '000' && item['@cat02'] == '000'){
+      return true;
+    }
+  });
+
+  //areacode
+  var apiMetaAreaList = json['GET_STATS_DATA']['STATISTICAL_DATA']['CLASS_INF']['CLASS_OBJ'].filter(function(item, index){
+    if(item['@id']=='area') {
+      return true;
+    }
+  });
+  
+  var data = new Array();
+  for(var key in valueData){
+    var apiAreaCode = apiMetaAreaList[0]['CLASS'].filter(function(item, index) {
+      if(item['@code'] == valueData[key]['@area']){
+        return true;
+      }
+    });
+    data.push({
+      code: apiMetaAreaList[0]['CLASS'][key]['@code'],
+      value: valueData[key]['$']
+    });
+  }
+
+  console.log(data)
+  console.log(data[0])
+  // console.log(apiMetaAreaList)
+  // console.log(valueData[0]['$'])
+  // console.log(json.GET_STATS_DATA.STATISTICAL_DATA.DATA_INF.VALUE[0])
+  // console.log(json.GET_STATS_DATA.STATISTICAL_DATA.DATA_INF.VALUE[0].$)
+  // console.log(json.GET_STATS_DATA.STATISTICAL_DATA.DATA_INF.VALUE[0]['@cat01'])
+  // console.log(json.GET_STATS_DATA.STATISTICAL_DATA.DATA_INF.VALUE[1].$)
+
+
+  //Load in TopoJSON data
+  d3.json('/data/geo/tokyo.topojson',function(error, json)
+  {
+    if (error)
+    {
+      return;
+    }
+
+    //decode
+    var features = topojson.feature(json, json.objects.tokyo).features;
+    
+    //Bind data and create one path per TopoJSON feature
+    for(var i=0; i<data.length; i++) {
+      for(var j=0; j<features.length; j++) {
+        if (data[i].code == features[j].properties.N03_007) {
+          features[j].properties.value = data[i].value;
+        }
+      }
+    }
+
+    //set Color scale
+    var color = d3.scale.linear()
+                  .domain([
+                    0,
+                    d3.max(features, function(d){
+                      return d.properties.value
+                    })
+                  ]) //min, max
+                  .range(["#ffffff", "#f24a7d"]);
+
+
+    geoLayer.selectAll('path')
+      .data(features)
+      .enter().append('path')
+      //.attr('fill', '#ccc')
+      .attr('stroke', '#888')
+      .attr('stroke-width', '1.2px')
+      .attr('d', path)
+      .attr('fill', function(d, i)
+      {
+        var value = features[i].properties.value;
+        //console.log(value)
+        if (value) {
+            //If value exists…
+            return color(value);
+        } else {
+            //If value is undefined…
+            return "#ccc";
+        }
+      })
+    
+
+    geoLayer.selectAll('Path')
+      .on('mouseover', function(d,i)
+      {
+        d3.select(this).transition().attr('stroke', '#fff')
+        if (infoLayer.current != i)
+        {
+          infoText.selectAll('text').remove();
+          infoText.selectAll('text').data(d3.entries(d.properties)).enter().append('text')
+            .text(function(d){return d.key + ': ' + d.value;}).attr({x:10,'fill':'#FFF','stroke':'none','font-size':16,'font-family':'sans-serif'})
+            .attr('y', function(d,i){return (i+2)*16;});
+          infoLayer.select('rect').attr(infoText.node().getBBox());
+        }
+      })
+      .on('mouseout', function(d) {
+        d3.select(this).transition().attr('stroke', '#888')
+      });
+  });
+});
+</script>

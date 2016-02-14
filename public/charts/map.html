@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<script src="/javascripts/vendor/d3.min.js"></script>
+<script src="/javascripts/vendor/topojson.min.js"></script>
+
+<body>
+
+<script>
+var width = 960;
+var height = 500;
+
+//create SVG element
+var svg = d3.select('body').append('svg')
+  .attr('width', width)
+  .attr('height', height);
+
+var geoLayer = svg.append('g');
+var infoLayer = svg.append('g');
+infoLayer.append('rect').attr({stroke:'none',fill:'rgba(0,0,0,0.75)'});
+var infoText = infoLayer.append('g');
+infoLayer.current = null;
+
+
+var zoom = d3.behavior.zoom()
+  .on('zoom', function()
+  {
+    projection.translate(zoom.translate()).scale(zoom.scale());
+    geoLayer.selectAll('path').attr('d', path);
+  });
+
+svg.call(zoom);
+
+zoom.translate([width/2,height/2]).scale(20000);
+
+var projection = d3.geo.mercator()
+  .center([139.4452884,35.7106589]) 
+  .scale(zoom.scale())
+  .translate(zoom.translate());
+var path = d3.geo.path().projection(projection);
+
+//Load in CSV data
+d3.csv('/data/geo/sampledata.csv', function(csvdata) 
+{
+  console.log(csvdata[0].code)
+  //Load in TopoJSON data
+  d3.json('/data/geo/tokyo.topojson',function(error, json)
+  {
+    if (error)
+    {
+      return;
+    }
+
+    //decode
+    var features = topojson.feature(json, json.objects.tokyo).features;
+    
+    //Bind data and create one path per TopoJSON feature
+    for(var i=0; i<csvdata.length; i++) {
+      for(var j=0; j<features.length; j++) {
+        if (csvdata[i].code == features[j].properties.N03_007) {
+          features[j].properties.value = csvdata[i].value;
+        }
+      }
+    }
+
+    //set Color scale
+    var colorList = ["#FFCCCC", "#FF0099"]
+    var color = d3.scale.linear()
+                  .domain([
+                    d3.min(features, (d) => d.properties.value),
+                    d3.max(features, (d) => d.properties.value)
+                  ]) //min, max
+                  .range(colorList);
+
+    geoLayer.selectAll('path')
+      .data(features)
+      .enter().append('path')
+      //.attr('fill', '#ccc')
+      .attr('stroke', '#888')
+      .attr('stroke-width', '1.2px')
+      .attr('d', path)
+      .attr('fill', function(d, i)
+      {
+        var value = features[i].properties.value;
+        //console.log(value)
+        if (value) {
+            //If value exists…
+            return color(value);
+        } else {
+            //If value is undefined…
+            return "#ccc";
+        }
+      })
+      .on('mouseover', function(d,i)
+      {
+        d3.select(this).transition().attr('stroke', '#fff')
+        if (infoLayer.current != i)
+        {
+          infoText.selectAll('text').remove();
+          infoText.selectAll('text').data(d3.entries(d.properties)).enter().append('text')
+            .text(function(d){return d.key + ': ' + d.value;}).attr({x:10,'fill':'#FFF','stroke':'none','font-size':16,'font-family':'sans-serif'})
+            .attr('y', function(d,i){return (i+2)*16;});
+          infoLayer.select('rect').attr(infoText.node().getBBox());
+        }
+      })
+      .on('mouseout', function(d) {
+        d3.select(this).transition().attr('stroke', '#888')
+      });
+  });
+});
+</script>
